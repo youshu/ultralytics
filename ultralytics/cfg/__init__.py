@@ -308,9 +308,10 @@ CFG_BOOL_KEYS = frozenset(
         "profile",
         "channels_last",
         "cls_remap",
+        "letterbox_scaleup",
     }
 )
-CFG_STR_KEYS = frozenset({"optimizer", "split", "copy_paste_mode", "auto_augment"})
+CFG_STR_KEYS = frozenset({"optimizer", "split", "copy_paste_mode", "auto_augment", "classify_resize"})
 
 
 def cfg2dict(cfg: str | Path | dict | SimpleNamespace) -> dict:

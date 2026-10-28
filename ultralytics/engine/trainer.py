@@ -646,7 +646,19 @@ class BaseTrainer:
 
             self.run_callbacks("on_train_epoch_end")
             if RANK in {-1, 0}:
-                self.ema.update_attr(self.model, include=["yaml", "nc", "args", "names", "stride", "class_weights"])
+                self.ema.update_attr(
+                    self.model,
+                    include=[
+                        "yaml",
+                        "nc",
+                        "args",
+                        "names",
+                        "stride",
+                        "class_weights",
+                        "transforms",
+                        "classify_preprocess",
+                    ],
+                )
 
             # Validation
             final_epoch = epoch + 1 >= self.epochs
@@ -1034,6 +1046,19 @@ class BaseTrainer:
                     "Resume checkpoint not found. Please pass a valid checkpoint to resume from, "
                     "i.e. 'yolo train resume model=path/to/last.pt'"
                 ) from e
+            if ckpt_args.get("task") == "classify":
+                from ultralytics.data.classification import resolve_classification_preprocess
+
+                saved_model = load_checkpoint(last)[0]
+                saved = resolve_classification_preprocess(saved_model)
+                requested = resolve_classification_preprocess(
+                    saved_model,
+                    overrides.get("imgsz"),
+                    overrides.get("classify_resize"),
+                    overrides.get("letterbox_scaleup"),
+                )
+                if requested != saved:
+                    raise ValueError("resume conflicts with the saved classification preprocessing")
             if self.args.data:
                 ckpt_args["data"] = self.args.data
 

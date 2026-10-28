@@ -272,6 +272,13 @@ class ONNXBackend(BaseBackend):
             # Check if dynamic shapes
             self.dynamic = isinstance(self.session.get_outputs()[0].shape[0], str)
             self.fp16 = "float16" in self.session.get_inputs()[0].type
+            spec = getattr(self, "classify_preprocess", None)
+            if spec:
+                shape = self.session.get_inputs()[0].shape
+                if len(shape) != 4 or any(
+                    isinstance(v, int) and v != expected for v, expected in zip(shape[1:], [3, *spec["imgsz"]])
+                ):
+                    raise ValueError("Classification preprocessing metadata differs from ONNX input shape")
 
             # Setup IO binding for CUDA and MIGraphX
             self.use_io_binding = cuda and all(isinstance(d, int) for o in self.session.get_outputs() for d in o.shape)

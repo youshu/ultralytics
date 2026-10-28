@@ -541,6 +541,20 @@ class Model(torch.nn.Module):
         kwargs = _handle_deprecation(kwargs)
         prompts = kwargs.pop("prompts", None)  # for SAM-type models
         args = {**self.overrides, **custom, **kwargs}  # highest priority args on the right
+        if self.task == "classify":
+            from ultralytics.data.classification import resolve_classification_preprocess
+
+            spec = resolve_classification_preprocess(
+                self.model,
+                kwargs.get("imgsz", self.overrides.get("imgsz")),
+                kwargs.get("classify_resize", self.overrides.get("classify_resize")),
+                kwargs.get("letterbox_scaleup", self.overrides.get("letterbox_scaleup")),
+            )
+            args.update(
+                imgsz=spec["imgsz"],
+                classify_resize=spec["classify_resize"],
+                letterbox_scaleup=spec.get("letterbox_scaleup", True),
+            )
         args["quantize"] = QUANTIZE_ALIASES.get(str(q := args.get("quantize")).lower(), q)  # unset quantize is FP32
 
         if (
@@ -558,7 +572,7 @@ class Model(torch.nn.Module):
                 **self.overrides,
                 **{k: getattr(self.predictor.args, k) for k in PREDICTOR_SETUP_KEYS},
             }
-            self.predictor.args = get_cfg(base_args, {**custom, **kwargs})
+            self.predictor.args = get_cfg(base_args, args if self.task == "classify" else {**custom, **kwargs})
             if self.predictor.args.show:
                 self.predictor.args.show = checks.check_imshow(warn=True)
             if prev_save_args != tuple(getattr(self.predictor.args, k, None) for k in save_keys):
@@ -1161,7 +1175,14 @@ class Model(torch.nn.Module):
             >>> print(reset_args)
             {'imgsz': 640, 'data': 'coco.yaml', 'task': 'detect'}
         """
-        include = {"imgsz", "data", "task", "single_cls"}  # only remember these arguments when loading a PyTorch model
+        include = {
+            "imgsz",
+            "data",
+            "task",
+            "single_cls",
+            "classify_resize",
+            "letterbox_scaleup",
+        }  # only remember these arguments when loading a PyTorch model
         return {k: v for k, v in args.items() if k in include}
 
     def _val_data(self) -> str | None:

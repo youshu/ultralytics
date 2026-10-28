@@ -1761,6 +1761,10 @@ class _SafeLoad:
 
                 for obj in (tvt.Compose, tvt.Normalize, tvt.Resize, tvt.CenterCrop, tvt.ToTensor, InterpolationMode):
                     cls._registry[f"{obj.__module__}.{obj.__qualname__}"] = obj
+            if "ultralytics.data.augment.ClassifyLetterBox" in needed:
+                from ultralytics.data.augment import ClassifyLetterBox
+
+                cls._registry["ultralytics.data.augment.ClassifyLetterBox"] = ClassifyLetterBox
             if "ultralytics.nn.text_model.CLIP" in needed:
                 import clip
 
@@ -2046,6 +2050,15 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
     if ckpt.get("modelopt"):  # QAT checkpoint: re-apply the fake-quantization it learned
         restore_qat(model, ckpt["modelopt"])
 
+    if getattr(model, "classify_preprocess", None) is not None:
+        from ultralytics.data.classification import validate_classification_preprocess
+
+        spec = validate_classification_preprocess(model.classify_preprocess)
+        args.update(
+            imgsz=spec["imgsz"][0] if spec["imgsz"][0] == spec["imgsz"][1] else spec["imgsz"],
+            classify_resize=spec["classify_resize"],
+            letterbox_scaleup=spec.get("letterbox_scaleup", True),
+        )
     # Model compatibility updates
     model.args = args  # attach args to model
     model.pt_path = str(weight)  # attach *.pt file path to model as string (avoids WindowsPath pickle issues)

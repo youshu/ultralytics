@@ -128,6 +128,8 @@ mixup: 0.0 # (float) MixUp augmentation probability
 cutmix: 0.0 # (float) CutMix augmentation probability
 copy_paste: 0.0 # (float) segment/semantic/obb copy-paste fraction of eligible objects
 copy_paste_mode: flip # (str) copy-paste strategy for segment/semantic/obb: flip or mixup
+classify_resize: auto # (str) classification: auto follows the model; new training defaults to native crops
+letterbox_scaleup: # (bool, optional) allow enlarging small classification inputs; follows saved model when unset
 auto_augment: randaugment # (str) classification auto augmentation policy: randaugment, autoaugment, augmix
 erasing: 0.4 # (float) random erasing probability for classification (0.0–1.0)
 

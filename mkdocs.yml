@@ -658,6 +658,7 @@ nav:
           - augment: reference/data/augment.md
           - base: reference/data/base.md
           - build: reference/data/build.md
+          - classification: reference/data/classification.md
           - converter: reference/data/converter.md
           - dataset: reference/data/dataset.md
           - loaders: reference/data/loaders.md

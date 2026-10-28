@@ -89,6 +89,7 @@ class BaseBackend(ABC):
             device (torch.device | str): Device to run inference on (e.g., 'cpu', 'cuda:0').
             fp16 (bool): Whether to use FP16 half-precision inference.
         """
+        self.weight = weight
         self.device = device
         self.fp16 = fp16
         self.nhwc = False
@@ -209,7 +210,11 @@ class BaseBackend(ABC):
 
         # Process type conversions for known fields
         for k, v in metadata.items():
-            if k in {"stride", "batch", "channels"}:
+            if k == "classify_preprocess":
+                from ultralytics.data.classification import validate_classification_preprocess
+
+                metadata[k] = validate_classification_preprocess(json.loads(v) if isinstance(v, str) else v)
+            elif k in {"stride", "batch", "channels"}:
                 metadata[k] = int(v)
             elif k in {"imgsz", "names", "kpt_shape", "kpt_names", "args", "end2end"} and isinstance(v, str):
                 metadata[k] = ast.literal_eval(v)

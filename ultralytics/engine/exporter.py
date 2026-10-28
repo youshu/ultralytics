@@ -989,6 +989,12 @@ class Exporter:
         self.pretty_name = Path(self.model.yaml.get("yaml_file", self.file)).stem.replace("yolo", "YOLO")
         data = model.args["data"] if hasattr(model, "args") and isinstance(model.args, dict) else ""
         description = f"Ultralytics {self.pretty_name} model {f'trained on {data}' if data else ''}"
+        if model.task == "classify":
+            from ultralytics.data.classification import resolve_classification_preprocess
+
+            self.classify_preprocess = resolve_classification_preprocess(
+                model, list(self.imgsz), self.args.classify_resize, self.args.letterbox_scaleup
+            )
         self.metadata = {
             "description": description,
             "author": "Ultralytics",
@@ -1006,6 +1012,8 @@ class Exporter:
             "channels": model.yaml.get("channels", 3),
             "end2end": getattr(model, "end2end", False),
         }  # model metadata
+        if model.task == "classify":
+            self.metadata["classify_preprocess"] = self.classify_preprocess
         if self.dla is not None:
             self.metadata["dla"] = self.dla  # make sure `AutoBackend` uses correct dla device if it has one
         if model.task == "pose":
@@ -1049,14 +1057,18 @@ class Exporter:
                 f"\nVisualize:       https://netron.app"
             )
 
+        if f and model.task == "classify" and Path(f).is_file():
+            from ultralytics.data.classification import write_classification_sidecar
+
+            write_classification_sidecar(f, self.classify_preprocess)
         self.run_callbacks("on_export_end")
         return f  # path to final export artifact
 
     def get_int8_calibration_dataloader(self, prefix=""):
         """Build and return a dataloader for calibration of INT8 models.
 
-        Images are emitted as uint8 [0, 255] at the export input shape. Classification images are resized and
-        center-cropped to the exact export (height, width) like classify inference, so rectangular `imgsz` exports
+        Images are emitted as uint8 [0, 255] at the export input shape. Classification images use the recorded spatial
+        transform at the exact export (height, width) like classify inference, so native rectangular `imgsz` exports
         calibrate on rectangular inputs; other tasks reuse their validation dataset transforms.
 
         Args:
@@ -1076,9 +1088,12 @@ class Exporter:
             data = check_cls_dataset(self.args.data, split=split)
             if not isinstance(cfg.fraction, list):
                 cfg.fraction = [cfg.fraction] * 3
+            cfg.classify_resize = self.classify_preprocess["classify_resize"]
+            cfg.letterbox_scaleup = self.classify_preprocess.get("letterbox_scaleup", True)
             dataset = ClassificationDataset(data[split], args=cfg, augment=False, prefix=split)
-            # INT8 backends divide images by 255, so keep the classify_transforms resize and center crop but emit uint8
-            dataset.torch_transforms = T.Compose([*dataset.torch_transforms.transforms[:2], T.PILToTensor()])
+            # INT8 backends divide images by 255; retain the recorded spatial transform but emit uint8.
+            spatial = dataset.torch_transforms.transforms[:-2]  # exclude ToTensor and Normalize for calibration
+            dataset.torch_transforms = T.Compose([*spatial, T.PILToTensor()])
         else:
             data = check_det_dataset(self.args.data, split=split)
             cfg.fraction = get_split_fraction(cfg.fraction, split) if isinstance(cfg.fraction, list) else cfg.fraction
@@ -1215,7 +1230,7 @@ class Exporter:
         # Metadata
         for k, v in self.metadata.items():
             meta = model_onnx.metadata_props.add()
-            meta.key, meta.value = k, str(v)
+            meta.key, meta.value = k, json.dumps(v) if k == "classify_preprocess" else str(v)
 
         # IR version
         if getattr(model_onnx, "ir_version", 0) > 10:

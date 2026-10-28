@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from PIL import Image
 
-from ultralytics.data.augment import classify_transforms
 from ultralytics.engine.predictor import BasePredictor
 from ultralytics.engine.results import Results
 from ultralytics.utils import DEFAULT_CFG, ops
@@ -49,6 +48,7 @@ class ClassificationPredictor(BasePredictor):
             overrides (dict, optional): Configuration overrides that take precedence over cfg.
             _callbacks (dict, optional): Dictionary of callback functions to be executed during prediction.
         """
+        self.classification_imgsz_explicit = overrides is not None and overrides.get("imgsz") is not None
         super().__init__(cfg, overrides, _callbacks)
         self.args.task = "classify"
 
@@ -56,15 +56,20 @@ class ClassificationPredictor(BasePredictor):
         """Set up source and inference mode and classify transforms."""
         import torchvision.transforms as T  # scope for faster 'import ultralytics'
 
-        super().setup_source(source)
-        transforms = getattr(self.model.model, "transforms", None)  # missing on YAML-built and legacy checkpoints
-        size = getattr(transforms.transforms[0], "size", self.imgsz) if transforms is not None else None
-        size = (size, size) if isinstance(size, int) else size
-        self.transforms = (
-            transforms
-            if size is not None and tuple(size) == tuple(self.imgsz) and self.model.format == "pt"
-            else classify_transforms(self.imgsz)
+        from ultralytics.data.classification import (
+            classification_transforms_from_spec,
+            resolve_classification_preprocess,
         )
+
+        self.classify_preprocess = resolve_classification_preprocess(
+            self.model,
+            self.args.imgsz if self.classification_imgsz_explicit else None,
+            self.args.classify_resize,
+            self.args.letterbox_scaleup,
+        )
+        self.args.imgsz = self.classify_preprocess["imgsz"]
+        super().setup_source(source)
+        self.transforms = classification_transforms_from_spec(self.classify_preprocess)
         tfl = getattr(self.transforms, "transforms", ())
         split = (
             type(self.transforms) is T.Compose

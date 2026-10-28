@@ -62,6 +62,9 @@ class ClassificationValidator(BaseValidator):
             args (dict, optional): Arguments containing model and validation configuration.
             _callbacks (dict, optional): Dictionary of callback functions to be called during validation.
         """
+        self.classification_imgsz_explicit = args is not None and (
+            "imgsz" in args if isinstance(args, dict) else hasattr(args, "imgsz")
+        )
         super().__init__(dataloader, save_dir, args, _callbacks)
         self.targets = None
         self.pred = None

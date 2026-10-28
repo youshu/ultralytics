@@ -89,6 +89,12 @@ class TensorRTBackend(BaseBackend):
                 profile_shape = tuple(engine.get_profile_shape(0, i)[1]) if is_input else None
 
             if is_input:
+                spec = metadata.get("classify_preprocess")
+                if spec and (
+                    len(shape) != 4
+                    or any(v != -1 and v != expected for v, expected in zip(shape[1:], [3, *spec["imgsz"]]))
+                ):
+                    raise ValueError("Classification preprocessing metadata differs from TensorRT input shape")
                 if -1 in shape:
                     self.dynamic = True
                     if self.is_trt10:

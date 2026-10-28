@@ -11,7 +11,7 @@ from ultralytics.data import ClassificationDataset, build_dataloader
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import ClassificationModel
-from ultralytics.utils import DEFAULT_CFG, RANK
+from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.utils.plotting import plot_images
 from ultralytics.utils.torch_utils import is_parallel, torch_distributed_zero_first
 
@@ -61,7 +61,23 @@ class ClassificationTrainer(BaseTrainer):
         overrides["multi_scale"] = 0.0  # classification batches are never rescaled
         if overrides.get("imgsz") is None and not overrides.get("resume"):
             overrides["imgsz"] = 224
+        requested = {k: overrides[k] for k in ("classify_resize", "letterbox_scaleup", "imgsz") if k in overrides}
         super().__init__(cfg, overrides, _callbacks)
+        if self.resume:
+            for key, value in requested.items():
+                if value not in (None, "auto") and value != getattr(self.args, key):
+                    raise ValueError(f"resume {key} conflicts with the saved classification preprocessing")
+        if self.args.classify_resize in (None, "auto"):
+            self.args.classify_resize = "default"
+        if self.args.letterbox_scaleup is None:
+            self.args.letterbox_scaleup = True
+        from ultralytics.data.classification import classification_preprocess
+
+        classification_preprocess(self.args.imgsz, self.args.classify_resize, self.args.letterbox_scaleup)
+        if self.args.classify_resize == "letterbox":
+            LOGGER.warning(
+                "Classification letterbox replaces RandomResizedCrop: scale is ignored; other augmentations remain active."
+            )
 
     def set_model_attributes(self):
         """Set the YOLO model's class names from the loaded dataset."""
@@ -151,6 +167,10 @@ class ClassificationTrainer(BaseTrainer):
                 self.model.module.transforms = loader.dataset.torch_transforms
             else:
                 self.model.transforms = loader.dataset.torch_transforms
+        if mode != "train":
+            from ultralytics.utils.torch_utils import unwrap_model
+
+            unwrap_model(self.model).classify_preprocess = dataset.classify_preprocess
         return loader
 
     def preprocess_batch(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

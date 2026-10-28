@@ -2920,6 +2920,8 @@ def classify_transforms(
     std: tuple[float, float, float] = DEFAULT_STD,
     interpolation: str = "BILINEAR",
     crop_fraction: float | None = None,
+    classify_resize: str = "default",
+    letterbox_scaleup: bool = True,
 ):
     """Create a composition of image transforms for classification tasks.
 
@@ -2934,6 +2936,8 @@ def classify_transforms(
         std (tuple[float, float, float]): Standard deviation values for each RGB channel used in normalization.
         interpolation (str): Interpolation method of either 'NEAREST', 'BILINEAR' or 'BICUBIC'.
         crop_fraction (float | None): Deprecated, will be removed in a future version.
+        classify_resize (str): Spatial transform: native default or centered letterbox without cropping.
+        letterbox_scaleup (bool): Allow letterbox to enlarge small images.
 
     Returns:
         (torchvision.transforms.Compose): A composition of torchvision transforms.
@@ -2960,7 +2964,15 @@ def classify_transforms(
         T.ToTensor(),
         T.Normalize(mean=torch.tensor(mean), std=torch.tensor(std)),
     ]
-    return T.Compose(tfl)
+    if classify_resize == "letterbox":
+        tfl[:2] = [ClassifyLetterBox(size, scaleup=letterbox_scaleup)]
+    elif classify_resize != "default":
+        raise ValueError("classify_resize must be default or letterbox")
+    from ultralytics.data.classification import classification_preprocess
+
+    pipeline = T.Compose(tfl)
+    pipeline.classify_preprocess = classification_preprocess(size, classify_resize, letterbox_scaleup)
+    return pipeline
 
 
 # Classification training augmentations --------------------------------------------------------------------------------
@@ -2979,6 +2991,8 @@ def classify_augmentations(
     force_color_jitter: bool = False,
     erasing: float = 0.0,
     interpolation: str = "BILINEAR",
+    classify_resize: str = "default",
+    letterbox_scaleup: bool = True,
 ):
     """Create a composition of image augmentation transforms for classification tasks.
 
@@ -3001,6 +3015,8 @@ def classify_augmentations(
         hsv_v (float): Image HSV-Value augmentation factor.
         force_color_jitter (bool): Whether to apply color jitter even if auto augment is enabled.
         erasing (float): Probability of random erasing.
+        classify_resize (str): Use native RandomResizedCrop or centered letterbox; letterbox ignores scale.
+        letterbox_scaleup (bool): Allow letterbox to enlarge small images.
         interpolation (str): Interpolation method of either 'NEAREST', 'BILINEAR' or 'BICUBIC'.
 
     Returns:
@@ -3017,7 +3033,13 @@ def classify_augmentations(
     scale = tuple(scale or (0.08, 1.0))  # default imagenet scale range
     ratio = tuple(ratio or (3.0 / 4.0, 4.0 / 3.0))  # default imagenet ratio range
     interpolation = getattr(T.InterpolationMode, interpolation)
-    primary_tfl = [T.RandomResizedCrop(size, scale=scale, ratio=ratio, interpolation=interpolation)]
+    if classify_resize not in {"default", "letterbox"}:
+        raise ValueError("classify_resize must be default or letterbox")
+    primary_tfl = (
+        [ClassifyLetterBox(size, scaleup=letterbox_scaleup)]
+        if classify_resize == "letterbox"
+        else [T.RandomResizedCrop(size, scale=scale, ratio=ratio, interpolation=interpolation)]
+    )
     if hflip > 0.0:
         primary_tfl.append(T.RandomHorizontalFlip(p=hflip))
     if vflip > 0.0:
@@ -3133,7 +3155,9 @@ class ClassifyLetterBox:
         (640, 640, 3)
     """
 
-    def __init__(self, size: int | tuple[int, int] = (640, 640), auto: bool = False, stride: int = 32):
+    def __init__(
+        self, size: int | tuple[int, int] = (640, 640), auto: bool = False, stride: int = 32, scaleup: bool = True
+    ):
         """Initialize the ClassifyLetterBox object for image preprocessing.
 
         This class is designed to be part of a transformation pipeline for image classification tasks. It resizes and
@@ -3144,9 +3168,12 @@ class ClassifyLetterBox:
                 size) is created. If a tuple, it should be (height, width).
             auto (bool): If True, automatically calculates the short side based on stride.
             stride (int): The stride value, used when 'auto' is True.
+            scaleup (bool): Allow enlarging small images.
         """
         super().__init__()
         self.h, self.w = (size, size) if isinstance(size, int) else size
+        self.size = (self.h, self.w)
+        self.scaleup = scaleup
         self.auto = auto  # pass max size integer, automatically solve for short side using stride
         self.stride = stride  # used with auto
 
@@ -3170,9 +3197,15 @@ class ClassifyLetterBox:
             >>> print(resized_image.shape)
             (640, 640, 3)
         """
+        from PIL import Image
+
+        pil = isinstance(im, Image.Image)
+        im = np.asarray(im) if pil else im
         imh, imw = im.shape[:2]
-        r = min(self.h / imh, self.w / imw)  # ratio of new/old dimensions
-        h, w = round(imh * r), round(imw * r)  # resized image dimensions
+        r = min(self.h / imh, self.w / imw)
+        if not self.scaleup:
+            r = min(r, 1.0)
+        h, w = max(1, round(imh * r)), max(1, round(imw * r))
 
         # Calculate padding dimensions
         hs, ws = (math.ceil(x / self.stride) * self.stride for x in (h, w)) if self.auto else (self.h, self.w)
@@ -3181,7 +3214,7 @@ class ClassifyLetterBox:
         # Create padded image
         im_out = np.full((hs, ws, 3), 114, dtype=im.dtype)
         im_out[top : top + h, left : left + w] = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
-        return im_out
+        return Image.fromarray(im_out) if pil else im_out
 
 
 # NOTE: keep this class for backward compatibility

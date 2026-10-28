@@ -1257,6 +1257,12 @@ class ClassificationDataset:
             LOGGER.warning(f"{self.prefix}Skipping caching images to disk, directory not writable")
         if self.cache_ram:
             self.cache_images()
+        from ultralytics.data.classification import classification_preprocess
+
+        mode = getattr(args, "classify_resize", "default")
+        mode = "default" if mode in (None, "auto") else mode
+        scaleup = getattr(args, "letterbox_scaleup", None)
+        self.classify_preprocess = classification_preprocess(args.imgsz, mode, True if scaleup is None else scaleup)
         scale = (1.0 - args.scale, 1.0)  # RandomResizedCrop area range, e.g. (0.5, 1.0) for scale=0.5
         self.torch_transforms = (
             classify_augmentations(
@@ -1269,9 +1275,15 @@ class ClassificationDataset:
                 hsv_h=args.hsv_h,
                 hsv_s=args.hsv_s,
                 hsv_v=args.hsv_v,
+                classify_resize=mode,
+                letterbox_scaleup=self.classify_preprocess.get("letterbox_scaleup", True),
             )
             if augment
-            else classify_transforms(size=args.imgsz)
+            else classify_transforms(
+                size=args.imgsz,
+                classify_resize=mode,
+                letterbox_scaleup=self.classify_preprocess.get("letterbox_scaleup", True),
+            )
         )
 
     def __getitem__(self, i: int) -> dict:

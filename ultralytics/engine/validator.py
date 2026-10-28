@@ -204,6 +204,16 @@ class BaseValidator:
             if augment and not model.base_model:
                 LOGGER.warning(f"'augment' is not supported by this model (format='{fmt}'), ignoring.")
                 augment = False
+            if self.args.task == "classify":
+                from ultralytics.data.classification import resolve_classification_preprocess
+
+                requested_size = self.args.imgsz if getattr(self, "classification_imgsz_explicit", True) else None
+                spec = resolve_classification_preprocess(
+                    model, requested_size, self.args.classify_resize, self.args.letterbox_scaleup
+                )
+                self.args.imgsz = spec["imgsz"][0] if spec["imgsz"][0] == spec["imgsz"][1] else spec["imgsz"]
+                self.args.classify_resize = spec["classify_resize"]
+                self.args.letterbox_scaleup = spec.get("letterbox_scaleup", True)
             imgsz = check_imgsz(self.args.imgsz, stride=stride, min_dim=2)
             if fmt != "pt" and hasattr(model, "imgsz") and not getattr(model, "dynamic", False):
                 self.args.imgsz = imgsz = model.imgsz  # reuse the full input shape from export metadata

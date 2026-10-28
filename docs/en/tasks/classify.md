@@ -359,3 +359,33 @@ You can export a trained YOLO26 model to various formats using Python or CLI com
         ```
 
 For detailed export options, refer to the [Export](../modes/export.md) page.
+
+## Letterbox classification
+
+Set `classify_resize=letterbox` to preserve the full image aspect ratio without RandomResizedCrop during training or
+CenterCrop during validation and prediction. It uses OpenCV linear interpolation and centered RGB 114 padding. The target
+must be square and divisible by 32. `letterbox_scaleup=False` avoids enlarging small images. The `scale` augmentation is
+ignored with a warning; flips, color augmentation, auto augmentation and random erasing remain configured independently.
+Some auto augmentation operations can still translate or rotate content; disable them if all content must remain visible.
+
+```python
+from ultralytics import YOLO
+
+model = YOLO("yolo11n-cls.pt")
+model.train(data="path/to/dataset", imgsz=224, classify_resize="letterbox", letterbox_scaleup=True)
+model = YOLO("runs/classify/train/weights/best.pt")
+model.predict("wide.jpg")  # follows the checkpoint's preprocessing and size
+model.val(data="path/to/dataset")
+model.export(format="engine", quantize=16)
+```
+
+`classify_resize=default` retains native RandomResizedCrop training and Resize + CenterCrop evaluation. New training with
+`auto` uses `default`; loading a model for inference with `auto` uses its saved settings. Explicit prediction overrides are
+allowed, but a static exported model cannot change input dimensions. Resume rejects preprocessing changes.
+
+Preprocessing remains outside the exported graph. Exports embed `classify_preprocess` and single-file exports write a
+SHA-256-bound `.preprocess.json` sidecar. Deploy the model and sidecar together. Ultralytics inference restores the recorded
+transform; applications executing raw TensorRT/ONNX tensors must apply the same transform and divide by 255 exactly once.
+INT8 calibration uses the same geometry and emits uint8 inputs for the backend's normalization.
+
+ROI cropping and padding belong to the application and are not part of this transform.
