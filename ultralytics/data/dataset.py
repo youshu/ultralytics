@@ -1263,7 +1263,7 @@ class ClassificationDataset:
         mode = "default" if mode in (None, "auto") else mode
         scaleup = getattr(args, "letterbox_scaleup", None)
         self.classify_preprocess = classification_preprocess(args.imgsz, mode, True if scaleup is None else scaleup)
-        scale = (1.0 - args.scale, 1.0)  # RandomResizedCrop area range, e.g. (0.5, 1.0) for scale=0.5
+        scale = (1.0 - args.scale, 1.0)  # Native crop area range, or letterbox linear shrink range.
         self.torch_transforms = (
             classify_augmentations(
                 size=args.imgsz,

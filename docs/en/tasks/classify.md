@@ -364,15 +364,21 @@ For detailed export options, refer to the [Export](../modes/export.md) page.
 
 Set `classify_resize=letterbox` to preserve the full image aspect ratio without RandomResizedCrop during training or
 CenterCrop during validation and prediction. It uses OpenCV linear interpolation and centered RGB 114 padding. The target
-must be square and divisible by 32. `letterbox_scaleup=False` avoids enlarging small images. The `scale` augmentation is
-ignored with a warning; flips, color augmentation, auto augmentation and random erasing remain configured independently.
+must be square and divisible by 32. `letterbox_scaleup=False` avoids enlarging small images during the initial letterbox.
+During training, `scale=s` uniformly samples a linear shrink factor in `[1-s, 1]` after letterboxing, then centers the
+shrunk canvas with 114 padding at the same output size. For example, `imgsz=224 scale=0.2` produces a canvas approximately
+179–224 pixels wide before padding. This training-only affine resize uses bilinear interpolation, without rotation,
+translation, or enlargement. Use `scale=0` to disable it; classification letterbox requires `0 <= scale < 1`.
+The existing cfg default `scale=0.5` also applies when not overridden. Validation, prediction, exports, and INT8 calibration
+remain deterministic and never apply this random shrinking. Native classification still uses `scale` as a crop-area
+parameter. Flips, color augmentation, auto augmentation and random erasing remain configured independently.
 Some auto augmentation operations can still translate or rotate content; disable them if all content must remain visible.
 
 ```python
 from ultralytics import YOLO
 
 model = YOLO("yolo11n-cls.pt")
-model.train(data="path/to/dataset", imgsz=224, classify_resize="letterbox", letterbox_scaleup=True)
+model.train(data="path/to/dataset", imgsz=224, classify_resize="letterbox", letterbox_scaleup=True, scale=0.2)
 model = YOLO("runs/classify/train/weights/best.pt")
 model.predict("wide.jpg")  # follows the checkpoint's preprocessing and size
 model.val(data="path/to/dataset")

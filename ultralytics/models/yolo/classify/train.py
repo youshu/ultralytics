@@ -11,7 +11,7 @@ from ultralytics.data import ClassificationDataset, build_dataloader
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
 from ultralytics.nn.tasks import ClassificationModel
-from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
+from ultralytics.utils import DEFAULT_CFG, RANK
 from ultralytics.utils.plotting import plot_images
 from ultralytics.utils.torch_utils import is_parallel, torch_distributed_zero_first
 
@@ -74,9 +74,9 @@ class ClassificationTrainer(BaseTrainer):
         from ultralytics.data.classification import classification_preprocess
 
         classification_preprocess(self.args.imgsz, self.args.classify_resize, self.args.letterbox_scaleup)
-        if self.args.classify_resize == "letterbox":
-            LOGGER.warning(
-                "Classification letterbox replaces RandomResizedCrop: scale is ignored; other augmentations remain active."
+        if self.args.classify_resize == "letterbox" and not 0 <= self.args.scale < 1:
+            raise ValueError(
+                "Classification letterbox requires 0 <= scale < 1; use scale=0 to disable random shrinking"
             )
 
     def set_model_attributes(self):

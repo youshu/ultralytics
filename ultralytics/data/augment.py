@@ -3005,7 +3005,8 @@ def classify_augmentations(
         size (int): Target size for the image after transformations.
         mean (tuple[float, float, float]): Mean values for each RGB channel used in normalization.
         std (tuple[float, float, float]): Standard deviation values for each RGB channel used in normalization.
-        scale (tuple[float, float] | None): Range of the proportion of the original image area to crop.
+        scale (tuple[float, float] | None): Native crop area range, or letterbox training linear shrink range
+            within (0, 1]. Letterbox is applied first, then the whole canvas is shrunk and padded with 114.
         ratio (tuple[float, float] | None): Range of aspect ratio for the cropped area.
         hflip (float): Probability of horizontal flip.
         vflip (float): Probability of vertical flip.
@@ -3015,7 +3016,7 @@ def classify_augmentations(
         hsv_v (float): Image HSV-Value augmentation factor.
         force_color_jitter (bool): Whether to apply color jitter even if auto augment is enabled.
         erasing (float): Probability of random erasing.
-        classify_resize (str): Use native RandomResizedCrop or centered letterbox; letterbox ignores scale.
+        classify_resize (str): Use native RandomResizedCrop or centered letterbox with random shrink-and-pad.
         letterbox_scaleup (bool): Allow letterbox to enlarge small images.
         interpolation (str): Interpolation method of either 'NEAREST', 'BILINEAR' or 'BICUBIC'.
 
@@ -3035,11 +3036,16 @@ def classify_augmentations(
     interpolation = getattr(T.InterpolationMode, interpolation)
     if classify_resize not in {"default", "letterbox"}:
         raise ValueError("classify_resize must be default or letterbox")
-    primary_tfl = (
-        [ClassifyLetterBox(size, scaleup=letterbox_scaleup)]
-        if classify_resize == "letterbox"
-        else [T.RandomResizedCrop(size, scale=scale, ratio=ratio, interpolation=interpolation)]
-    )
+    if classify_resize == "letterbox":
+        if len(scale) != 2 or not 0 < scale[0] <= scale[1] <= 1:
+            raise ValueError("Classification letterbox requires 0 <= scale < 1 (linear shrink range within (0, 1])")
+        primary_tfl = [ClassifyLetterBox(size, scaleup=letterbox_scaleup)]
+        if scale != (1.0, 1.0):
+            primary_tfl.append(
+                T.RandomAffine(degrees=0, scale=scale, interpolation=T.InterpolationMode.BILINEAR, fill=114)
+            )
+    else:
+        primary_tfl = [T.RandomResizedCrop(size, scale=scale, ratio=ratio, interpolation=interpolation)]
     if hflip > 0.0:
         primary_tfl.append(T.RandomHorizontalFlip(p=hflip))
     if vflip > 0.0:

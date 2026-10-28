@@ -45,10 +45,41 @@ def test_geometry_and_color(shape, scaleup, size):
     np.testing.assert_array_equal((tensor[0].permute(1, 2, 0).numpy() * 255).round().astype(np.uint8), expected)
 
 
-def test_scale_does_not_crop_letterbox():
-    image = Image.fromarray(np.full((40, 80, 3), 22, dtype=np.uint8))
-    kw = {
-        "size": 64,
+@pytest.mark.parametrize("shape,scaleup", [((224, 224), True), ((80, 160), True), ((80, 160), False)])
+def test_letterbox_scale_preserves_content(shape, scaleup):
+    image = np.full((*shape, 3), 22, dtype=np.uint8)
+    image[:, : shape[1] // 4] = (255, 0, 0)
+    image[:, -shape[1] // 4 :] = (0, 0, 255)
+    image[: shape[0] // 4, shape[1] // 4 : 3 * shape[1] // 4] = (0, 255, 0)
+    image[-shape[0] // 4 :, shape[1] // 4 : 3 * shape[1] // 4] = (255, 255, 0)
+    transform = classify_augmentations(
+        size=224,
+        scale=(0.5, 0.5),
+        hflip=0,
+        vflip=0,
+        hsv_h=0,
+        hsv_s=0,
+        hsv_v=0,
+        erasing=0,
+        classify_resize="letterbox",
+        letterbox_scaleup=scaleup,
+    )
+    output = transform(Image.fromarray(image))
+    assert output.shape == (3, 224, 224)
+    for color in ((255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 255, 0)):
+        assert (output == torch.tensor(color)[:, None, None] / 255).all(0).any()
+    content = (output != 114 / 255).any(0).nonzero()
+    assert content[:, 0].min() >= 56 and content[:, 0].max() < 168
+    assert content[:, 1].min() >= 56 and content[:, 1].max() < 168
+    # Inference keeps its original geometry, without the training-only shrink.
+    reference = classify_transforms(224, classify_resize="letterbox", letterbox_scaleup=scaleup)(Image.fromarray(image))
+    assert (reference != 114 / 255).any(0).sum() > (output != 114 / 255).any(0).sum()
+
+
+def test_letterbox_scale_is_seeded_and_can_be_disabled():
+    image = Image.fromarray(np.full((224, 224, 3), 22, dtype=np.uint8))
+    kwargs = {
+        "size": 224,
         "hflip": 0,
         "vflip": 0,
         "hsv_h": 0,
@@ -57,11 +88,23 @@ def test_scale_does_not_crop_letterbox():
         "erasing": 0,
         "classify_resize": "letterbox",
     }
+    transform = classify_augmentations(scale=(0.8, 1), **kwargs)
     torch.manual_seed(7)
-    a = classify_augmentations(scale=(0.1, 1), **kw)(image)
+    first = transform(image)
     torch.manual_seed(7)
-    b = classify_augmentations(scale=(1, 1), **kw)(image)
-    torch.testing.assert_close(a, b, rtol=0, atol=0)
+    torch.testing.assert_close(first, transform(image), rtol=0, atol=0)
+    torch.manual_seed(42)
+    assert not torch.equal(first, transform(image))
+    content = (first != 114 / 255).any(0).nonzero()
+    width = int(content[:, 1].max() - content[:, 1].min() + 1)
+    assert 179 <= width <= 224
+    deterministic = classify_augmentations(scale=(1, 1), **kwargs)
+    assert not any(isinstance(t, T.RandomAffine) for t in deterministic.transforms)
+    torch.testing.assert_close(
+        deterministic(image), classify_transforms(224, classify_resize="letterbox")(image), rtol=0, atol=0
+    )
+    with pytest.raises(ValueError, match="scale"):
+        classify_augmentations(scale=(0, 1), **kwargs)
 
 
 def test_roundtrip_prediction_and_size_switch(tmp_path):
@@ -97,7 +140,7 @@ def test_dataset_train_eval_parity(tmp_path):
             "imgsz": 64,
             "classify_resize": "letterbox",
             "letterbox_scaleup": False,
-            "scale": 0.2,
+            "scale": 0.0,
             "auto_augment": None,
             "hsv_h": 0,
             "hsv_s": 0,
