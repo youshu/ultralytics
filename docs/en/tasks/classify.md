@@ -364,11 +364,13 @@ For detailed export options, refer to the [Export](../modes/export.md) page.
 
 Set `classify_resize=letterbox` to preserve the full image aspect ratio without RandomResizedCrop during training or
 CenterCrop during validation and prediction. It uses OpenCV linear interpolation and centered RGB 114 padding. The target
-must be square and divisible by 32. `letterbox_scaleup=False` avoids enlarging small images during the initial letterbox.
-During training, `scale=s` uniformly samples a linear shrink factor in `[1-s, 1]` after letterboxing, then centers the
-shrunk canvas with 114 padding at the same output size. For example, `imgsz=224 scale=0.2` produces a canvas approximately
-179–224 pixels wide before padding. This training-only affine resize uses bilinear interpolation, without rotation,
-translation, or enlargement. Use `scale=0` to disable it; classification letterbox requires `0 <= scale < 1`.
+must be square and divisible by 32. During training, `scale=s` uniformly samples a linear shrink factor in
+`[1-s, 1]` and resizes the original image with OpenCV linear interpolation **before** applying Letterbox.
+For example, a 400×200 original with a sampled factor of 0.8 becomes 320×160, then is letterboxed to 224×224.
+No padding is added until Letterbox. With `letterbox_scaleup=True`, Letterbox generally cancels the size change;
+the extra resampling remains. With `letterbox_scaleup=False`, smaller images are not enlarged, so their content
+can occupy less of the output; images still larger than the target are fitted as usual.
+Use `scale=0` to disable random resizing; classification letterbox requires `0 <= scale < 1`.
 The existing cfg default `scale=0.5` also applies when not overridden. Validation, prediction, exports, and INT8 calibration
 remain deterministic and never apply this random shrinking. Native classification still uses `scale` as a crop-area
 parameter. Flips, color augmentation, auto augmentation and random erasing remain configured independently.

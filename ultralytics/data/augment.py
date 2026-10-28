@@ -3006,7 +3006,7 @@ def classify_augmentations(
         mean (tuple[float, float, float]): Mean values for each RGB channel used in normalization.
         std (tuple[float, float, float]): Standard deviation values for each RGB channel used in normalization.
         scale (tuple[float, float] | None): Native crop area range, or letterbox training linear shrink range
-            within (0, 1]. Letterbox is applied first, then the whole canvas is shrunk and padded with 114.
+            within (0, 1]. The original image is resized first, then letterboxed with 114 padding.
         ratio (tuple[float, float] | None): Range of aspect ratio for the cropped area.
         hflip (float): Probability of horizontal flip.
         vflip (float): Probability of vertical flip.
@@ -3016,7 +3016,7 @@ def classify_augmentations(
         hsv_v (float): Image HSV-Value augmentation factor.
         force_color_jitter (bool): Whether to apply color jitter even if auto augment is enabled.
         erasing (float): Probability of random erasing.
-        classify_resize (str): Use native RandomResizedCrop or centered letterbox with random shrink-and-pad.
+        classify_resize (str): Use native RandomResizedCrop or random original-image resizing followed by letterbox.
         letterbox_scaleup (bool): Allow letterbox to enlarge small images.
         interpolation (str): Interpolation method of either 'NEAREST', 'BILINEAR' or 'BICUBIC'.
 
@@ -3037,13 +3037,7 @@ def classify_augmentations(
     if classify_resize not in {"default", "letterbox"}:
         raise ValueError("classify_resize must be default or letterbox")
     if classify_resize == "letterbox":
-        if len(scale) != 2 or not 0 < scale[0] <= scale[1] <= 1:
-            raise ValueError("Classification letterbox requires 0 <= scale < 1 (linear shrink range within (0, 1])")
-        primary_tfl = [ClassifyLetterBox(size, scaleup=letterbox_scaleup)]
-        if scale != (1.0, 1.0):
-            primary_tfl.append(
-                T.RandomAffine(degrees=0, scale=scale, interpolation=T.InterpolationMode.BILINEAR, fill=114)
-            )
+        primary_tfl = [ClassifyLetterBox(size, scaleup=letterbox_scaleup, scale=scale)]
     else:
         primary_tfl = [T.RandomResizedCrop(size, scale=scale, ratio=ratio, interpolation=interpolation)]
     if hflip > 0.0:
@@ -3162,7 +3156,12 @@ class ClassifyLetterBox:
     """
 
     def __init__(
-        self, size: int | tuple[int, int] = (640, 640), auto: bool = False, stride: int = 32, scaleup: bool = True
+        self,
+        size: int | tuple[int, int] = (640, 640),
+        auto: bool = False,
+        stride: int = 32,
+        scaleup: bool = True,
+        scale: tuple[float, float] = (1.0, 1.0),
     ):
         """Initialize the ClassifyLetterBox object for image preprocessing.
 
@@ -3175,11 +3174,16 @@ class ClassifyLetterBox:
             auto (bool): If True, automatically calculates the short side based on stride.
             stride (int): The stride value, used when 'auto' is True.
             scaleup (bool): Allow enlarging small images.
+            scale (tuple[float, float]): Training-only linear resize range for the original image before letterbox.
+                The default (1, 1) disables resizing. Subsequent letterbox enlargement can cancel the size change.
         """
         super().__init__()
         self.h, self.w = (size, size) if isinstance(size, int) else size
         self.size = (self.h, self.w)
         self.scaleup = scaleup
+        if len(scale) != 2 or not 0 < scale[0] <= scale[1] <= 1:
+            raise ValueError("Classification letterbox scale range must satisfy 0 < min <= max <= 1")
+        self.scale = tuple(scale)
         self.auto = auto  # pass max size integer, automatically solve for short side using stride
         self.stride = stride  # used with auto
 
@@ -3208,6 +3212,10 @@ class ClassifyLetterBox:
         pil = isinstance(im, Image.Image)
         im = np.asarray(im) if pil else im
         imh, imw = im.shape[:2]
+        if self.scale != (1.0, 1.0):
+            factor = torch.empty(1).uniform_(*self.scale).item()
+            imh, imw = max(1, round(imh * factor)), max(1, round(imw * factor))
+            im = cv2.resize(im, (imw, imh), interpolation=cv2.INTER_LINEAR)
         r = min(self.h / imh, self.w / imw)
         if not self.scaleup:
             r = min(r, 1.0)

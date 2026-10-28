@@ -68,12 +68,15 @@ def test_letterbox_scale_preserves_content(shape, scaleup):
     assert output.shape == (3, 224, 224)
     for color in ((255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 255, 0)):
         assert (output == torch.tensor(color)[:, None, None] / 255).all(0).any()
-    content = (output != 114 / 255).any(0).nonzero()
-    assert content[:, 0].min() >= 56 and content[:, 0].max() < 168
-    assert content[:, 1].min() >= 56 and content[:, 1].max() < 168
-    # Inference keeps its original geometry, without the training-only shrink.
+    resized = cv2.resize(image, (round(shape[1] * 0.5), round(shape[0] * 0.5)), interpolation=cv2.INTER_LINEAR)
+    expected = ClassifyLetterBox(224, scaleup=scaleup)(resized)
+    torch.testing.assert_close(output, T.ToTensor()(expected), rtol=0, atol=0)
     reference = classify_transforms(224, classify_resize="letterbox", letterbox_scaleup=scaleup)(Image.fromarray(image))
-    assert (reference != 114 / 255).any(0).sum() > (output != 114 / 255).any(0).sum()
+    if scaleup:
+        # Letterbox enlargement cancels the size change, but not the extra resampling.
+        assert (reference != 114 / 255).any(0).sum() == (output != 114 / 255).any(0).sum()
+    else:
+        assert (reference != 114 / 255).any(0).sum() > (output != 114 / 255).any(0).sum()
 
 
 def test_letterbox_scale_is_seeded_and_can_be_disabled():
@@ -87,6 +90,7 @@ def test_letterbox_scale_is_seeded_and_can_be_disabled():
         "hsv_v": 0,
         "erasing": 0,
         "classify_resize": "letterbox",
+        "letterbox_scaleup": False,
     }
     transform = classify_augmentations(scale=(0.8, 1), **kwargs)
     torch.manual_seed(7)
@@ -99,7 +103,7 @@ def test_letterbox_scale_is_seeded_and_can_be_disabled():
     width = int(content[:, 1].max() - content[:, 1].min() + 1)
     assert 179 <= width <= 224
     deterministic = classify_augmentations(scale=(1, 1), **kwargs)
-    assert not any(isinstance(t, T.RandomAffine) for t in deterministic.transforms)
+    assert deterministic.transforms[0].scale == (1, 1)
     torch.testing.assert_close(
         deterministic(image), classify_transforms(224, classify_resize="letterbox")(image), rtol=0, atol=0
     )
